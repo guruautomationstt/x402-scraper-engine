@@ -111,7 +111,7 @@ Add the 6-tool suite to **Claude Desktop**, **Cursor**, **Windsurf**, or **Eliza
   "mcpServers": {
     "x402-agent-intelligence": {
       "command": "npx",
-      "args": ["-y", "github:ami-guru/x402-scraper-engine"],
+      "args": ["-y", "github:guruautomationstt/x402-scraper-engine"],
       "env": {
         "BASE_RPC_URL": "https://mainnet.base.org",
         "AGENT_PRIVATE_KEY": "0xYourAgentFundedPrivateKey"

@@ -626,7 +626,7 @@ export default {
           llms_txt: `${url.origin}/llms.txt`,
           stats_url: `${url.origin}/v1/stats`,
           bazaar_discovery: `${url.origin}/.well-known/x402.json`,
-          docs: 'https://github.com/ami-guru/x402-scraper-engine',
+          docs: 'https://github.com/guruautomationstt/x402-scraper-engine',
           openapi: `${url.origin}/openapi.json`,
           mcp: `${url.origin}/mcp.json`
         });
@@ -663,7 +663,7 @@ Every new client agent receives 2 free trial calls across any endpoint before re
 ## MCP Quickstart
 Run instantly in Claude Code, Cursor, Windsurf, or Codex CLI:
 \`\`\`bash
-npx -y github:ami-guru/x402-scraper-engine
+npx -y github:guruautomationstt/x402-scraper-engine
 \`\`\`
 `;
         return new Response(llmsContent, {
