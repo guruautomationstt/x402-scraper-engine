@@ -193,6 +193,14 @@ export interface AuditResponse {
   };
 }
 
+export interface SecurityShieldReport {
+  sanitized: boolean;
+  hidden_elements_purged: number;
+  zero_width_chars_removed: number;
+  injections_detected: number;
+  threat_flags: string[];
+}
+
 export interface ScrapeResponse {
   success: boolean;
   url: string;
@@ -200,6 +208,7 @@ export interface ScrapeResponse {
   markdown: string;
   tokens_estimated: number;
   bypass_tier?: string;
+  security_shield?: SecurityShieldReport;
   payment?: {
     tx_hash: string;
     network: string;

@@ -4,7 +4,7 @@
  */
 
 import puppeteer from '@cloudflare/puppeteer';
-import { Env } from './types';
+import { Env, SecurityShieldReport } from './types';
 
 export interface SearchResultItem {
   title: string;
@@ -182,6 +182,7 @@ export async function scrapeToMarkdown(
   tokensEstimated: number;
   bypassTier?: string;
   totalPages?: number;
+  securityShield?: SecurityShieldReport;
 }> {
   const urlCheck = validateUrl(targetUrl);
   if (!urlCheck.valid || !urlCheck.url) {
@@ -201,12 +202,13 @@ export async function scrapeToMarkdown(
       const pageTitle = await page.title();
       await browser.close();
 
-      const { title, markdown } = htmlToMarkdown(html, urlCheck.url.origin);
+      const res = htmlToMarkdown(html, urlCheck.url.origin);
       return {
-        title: pageTitle || title || urlCheck.url.hostname,
-        markdown,
-        tokensEstimated: estimateTokens(markdown),
-        bypassTier: 'headless_browser'
+        title: pageTitle || res.title || urlCheck.url.hostname,
+        markdown: res.markdown,
+        tokensEstimated: estimateTokens(res.markdown),
+        bypassTier: 'headless_browser',
+        securityShield: res.securityShield
       };
     } catch {
       // Fall through to stealth fetch
@@ -245,12 +247,13 @@ export async function scrapeToMarkdown(
         const pageTitle = await page.title();
         await browser.close();
 
-        const { title, markdown } = htmlToMarkdown(html, urlCheck.url.origin);
+        const res = htmlToMarkdown(html, urlCheck.url.origin);
         return {
-          title: pageTitle || title || urlCheck.url.hostname,
-          markdown,
-          tokensEstimated: estimateTokens(markdown),
-          bypassTier: 'headless_browser_unblock'
+          title: pageTitle || res.title || urlCheck.url.hostname,
+          markdown: res.markdown,
+          tokensEstimated: estimateTokens(res.markdown),
+          bypassTier: 'headless_browser_unblock',
+          securityShield: res.securityShield
         };
       } catch (browserErr: any) {
         fallbackError = `Browser error: ${browserErr.message}`;
@@ -334,8 +337,8 @@ export async function scrapeToMarkdown(
   }
 
   const rawHtml = await response.text();
-  const { title, markdown } = htmlToMarkdown(rawHtml, urlCheck.url.origin);
-  const tokensEstimated = estimateTokens(markdown);
+  const res = htmlToMarkdown(rawHtml, urlCheck.url.origin);
+  const tokensEstimated = estimateTokens(res.markdown);
 
   // If parsed markdown is virtually empty (SPA client-side rendering), also attempt Browser hydration
   if (tokensEstimated < 25 && rawHtml.includes('<script')) {
@@ -348,35 +351,86 @@ export async function scrapeToMarkdown(
         const pageTitle = await page.title();
         await browser.close();
 
-        const res = htmlToMarkdown(html, urlCheck.url.origin);
+        const spaRes = htmlToMarkdown(html, urlCheck.url.origin);
         return {
-          title: pageTitle || res.title || urlCheck.url.hostname,
-          markdown: res.markdown,
-          tokensEstimated: estimateTokens(res.markdown),
-          bypassTier: 'spa_hydrated_browser'
+          title: pageTitle || spaRes.title || urlCheck.url.hostname,
+          markdown: spaRes.markdown,
+          tokensEstimated: estimateTokens(spaRes.markdown),
+          bypassTier: 'spa_hydrated_browser',
+          securityShield: spaRes.securityShield
         };
       } catch {}
     }
   }
 
   return {
-    title,
-    markdown,
+    title: res.title,
+    markdown: res.markdown,
     tokensEstimated,
-    bypassTier
+    bypassTier,
+    securityShield: res.securityShield
   };
 }
 
 /**
- * Convert HTML string to token-efficient Markdown
+ * Convert HTML string to token-efficient Markdown with Zero-Trust Prompt Injection Defense
  */
-export function htmlToMarkdown(html: string, baseUrl?: string): { title: string; markdown: string } {
+export function htmlToMarkdown(html: string, baseUrl?: string): { title: string; markdown: string; securityShield: SecurityShieldReport } {
   // 1. Extract Title
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   let title = titleMatch ? decodeHtmlEntities(titleMatch[1].trim()) : '';
 
-  // 2. Remove non-content tags & bloat
-  let clean = html
+  // 2a. Zero-Trust Security Shield: Neutralize Indirect Prompt Injections & Hidden DOM Elements
+  let hiddenElementsPurged = 0;
+  let zeroWidthCharsRemoved = 0;
+  let injectionsDetected = 0;
+  const threatFlags: string[] = [];
+
+  // Remove hidden CSS elements (display:none, visibility:hidden, font-size:0, opacity:0)
+  const hiddenRegex = /<(?:div|span|p|section|article|b|i|font|aside)[^>]*style=["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:px)?|opacity\s*:\s*0)[^"']*["'][^>]*>[\s\S]*?<\/(?:div|span|p|section|article|b|i|font|aside)>/gi;
+  const hiddenMatches = html.match(hiddenRegex);
+  if (hiddenMatches) {
+    hiddenElementsPurged += hiddenMatches.length;
+  }
+  let clean = html.replace(hiddenRegex, '');
+
+  // Strip zero-width & invisible unicode characters used for prompt injection obfuscation
+  const zeroWidthRegex = /[\u200B\u200C\u200D\uFEFF\u00AD\u2060\u2061\u2062\u2063]/g;
+  const zeroMatches = clean.match(zeroWidthRegex);
+  if (zeroMatches) {
+    zeroWidthCharsRemoved += zeroMatches.length;
+    clean = clean.replace(zeroWidthRegex, '');
+  }
+
+  // Detect & neutralize common indirect prompt injection triggers
+  const injectionPatterns = [
+    /ignore\s+(?:all\s+)?previous\s+instructions/gi,
+    /system\s+prompt\s+override/gi,
+    /you\s+are\s+now\s+in\s+developer\s+mode/gi,
+    /disregard\s+(?:all\s+)?prior\s+instructions/gi,
+    /\[INST\][\s\S]*?\[\/INST\]/gi,
+    /<\|im_start\|>system/gi
+  ];
+
+  for (const pattern of injectionPatterns) {
+    const matches = clean.match(pattern);
+    if (matches) {
+      injectionsDetected += matches.length;
+      threatFlags.push(`Indirect prompt injection neutralized: ${matches[0].slice(0, 30)}...`);
+      clean = clean.replace(pattern, (m) => `[NEUTRALIZED_INJECTION: "${m}"]`);
+    }
+  }
+
+  const securityShield: SecurityShieldReport = {
+    sanitized: true,
+    hidden_elements_purged: hiddenElementsPurged,
+    zero_width_chars_removed: zeroWidthCharsRemoved,
+    injections_detected: injectionsDetected,
+    threat_flags: threatFlags
+  };
+
+  // 2b. Remove non-content tags & bloat
+  clean = clean
     .replace(/<!--[\s\S]*?-->/g, '') // HTML comments
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // <script>
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '') // <style>
@@ -444,7 +498,7 @@ export function htmlToMarkdown(html: string, baseUrl?: string): { title: string;
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  return { title, markdown: clean };
+  return { title, markdown: clean, securityShield };
 }
 
 /**
