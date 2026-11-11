@@ -173,7 +173,8 @@ export async function scrapeToMarkdown(targetUrl, env, renderJs = false) {
                 markdown: res.markdown,
                 tokensEstimated: estimateTokens(res.markdown),
                 bypassTier: 'headless_browser',
-                securityShield: res.securityShield
+                securityShield: res.securityShield,
+                fitMarkdown: res.fitMarkdown
             };
         }
         catch {
@@ -213,7 +214,8 @@ export async function scrapeToMarkdown(targetUrl, env, renderJs = false) {
                     markdown: res.markdown,
                     tokensEstimated: estimateTokens(res.markdown),
                     bypassTier: 'headless_browser_unblock',
-                    securityShield: res.securityShield
+                    securityShield: res.securityShield,
+                    fitMarkdown: res.fitMarkdown
                 };
             }
             catch (browserErr) {
@@ -312,7 +314,8 @@ export async function scrapeToMarkdown(targetUrl, env, renderJs = false) {
                     markdown: spaRes.markdown,
                     tokensEstimated: estimateTokens(spaRes.markdown),
                     bypassTier: 'spa_hydrated_browser',
-                    securityShield: spaRes.securityShield
+                    securityShield: spaRes.securityShield,
+                    fitMarkdown: spaRes.fitMarkdown
                 };
             }
             catch { }
@@ -323,11 +326,12 @@ export async function scrapeToMarkdown(targetUrl, env, renderJs = false) {
         markdown: res.markdown,
         tokensEstimated,
         bypassTier,
-        securityShield: res.securityShield
+        securityShield: res.securityShield,
+        fitMarkdown: res.fitMarkdown
     };
 }
 /**
- * Convert HTML string to token-efficient Markdown with Zero-Trust Prompt Injection Defense
+ * Convert HTML string to token-efficient Markdown with Zero-Trust Prompt Injection Defense & Fit-Markdown Pruning
  */
 export function htmlToMarkdown(html, baseUrl) {
     // 1. Extract Title
@@ -376,7 +380,47 @@ export function htmlToMarkdown(html, baseUrl) {
         injections_detected: injectionsDetected,
         threat_flags: threatFlags
     };
-    // 2b. Remove non-content tags & bloat
+    // 2b. Extract Embedded JSON-LD Microdata (before script tags are removed)
+    let jsonLdYaml = '';
+    let jsonLdExtracted = false;
+    let entitiesFound = 0;
+    const jsonLdRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let ldMatch;
+    const entities = [];
+    while ((ldMatch = jsonLdRegex.exec(clean)) !== null) {
+        try {
+            const parsed = JSON.parse(ldMatch[1].trim());
+            if (Array.isArray(parsed)) {
+                entities.push(...parsed);
+            }
+            else if (parsed && typeof parsed === 'object') {
+                entities.push(parsed);
+            }
+        }
+        catch {
+            // ignore malformed JSON-LD
+        }
+    }
+    if (entities.length > 0) {
+        jsonLdExtracted = true;
+        entitiesFound = entities.length;
+        const summaryEntities = entities.slice(0, 3).map(e => ({
+            type: e['@type'] || e.type || 'Entity',
+            name: e.name || e.headline || e.title,
+            description: e.description ? (e.description.length > 150 ? e.description.slice(0, 150) + '...' : e.description) : undefined,
+            author: typeof e.author === 'string' ? e.author : e.author?.name,
+            datePublished: e.datePublished || e.dateCreated,
+            price: e.offers?.price || e.price,
+            currency: e.offers?.priceCurrency || e.priceCurrency
+        }));
+        jsonLdYaml = `---\nschema_org_entities:\n` + summaryEntities.map(e => `  - type: ${e.type}\n    name: "${(e.name || '').replace(/"/g, '\\"')}"` + (e.author ? `\n    author: "${e.author}"` : '') + (e.datePublished ? `\n    date: "${e.datePublished}"` : '') + (e.price ? `\n    price: "${e.price} ${e.currency || ''}"` : '')).join('\n') + `\n---\n\n`;
+    }
+    // Baseline token estimation prior to boilerplate pruning
+    const rawTokenBaseline = estimateTokens(clean);
+    // 2c. Fit-Markdown: Prune boilerplate noise containers (cookie banners, popups, newsletter boxes, ad slots)
+    const boilerplateRegex = /<(?:div|aside|section|form|dialog)[^>]*(?:class|id)=["'][^"']*(?:cookie[-_]?banner|consent[-_]?banner|gdpr|newsletter|subscribe[-_]?box|ad[-_]?container|advertisement|social[-_]?share|share[-_]?buttons|footer[-_]?nav|sidebar[-_]?nav|menu[-_]?wrapper|popup[-_]?modal|announcement[-_]?bar)[^"']*["'][^>]*>[\s\S]*?<\/(?:div|aside|section|form|dialog)>/gi;
+    clean = clean.replace(boilerplateRegex, '');
+    // 2d. Remove non-content tags & bloat
     clean = clean
         .replace(/<!--[\s\S]*?-->/g, '') // HTML comments
         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // <script>
@@ -434,7 +478,20 @@ export function htmlToMarkdown(html, baseUrl) {
         .join('\n')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
-    return { title, markdown: clean, securityShield };
+    // Prepend JSON-LD Frontmatter if extracted
+    if (jsonLdYaml) {
+        clean = jsonLdYaml + clean;
+    }
+    const finalTokens = estimateTokens(clean);
+    const tokensSaved = Math.max(0, rawTokenBaseline - finalTokens);
+    const reductionPct = rawTokenBaseline > 0 ? `${Math.round((tokensSaved / rawTokenBaseline) * 100)}%` : '0%';
+    const fitMarkdown = {
+        tokens_saved: tokensSaved,
+        reduction_pct: reductionPct,
+        json_ld_extracted: jsonLdExtracted,
+        entities_found: entitiesFound
+    };
+    return { title, markdown: clean, securityShield, fitMarkdown };
 }
 /**
  * Decode common HTML entities

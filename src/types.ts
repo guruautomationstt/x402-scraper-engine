@@ -201,6 +201,13 @@ export interface SecurityShieldReport {
   threat_flags: string[];
 }
 
+export interface FitMarkdownStats {
+  tokens_saved: number;
+  reduction_pct: string;
+  json_ld_extracted: boolean;
+  entities_found: number;
+}
+
 export interface ScrapeResponse {
   success: boolean;
   url: string;
@@ -209,6 +216,7 @@ export interface ScrapeResponse {
   tokens_estimated: number;
   bypass_tier?: string;
   security_shield?: SecurityShieldReport;
+  fit_markdown?: FitMarkdownStats;
   payment?: {
     tx_hash: string;
     network: string;

@@ -824,7 +824,10 @@ npx -y github:guruautomationstt/x402-scraper-engine
                     'X-Bypass-Tier': scrapeResult.bypassTier || 'stealth_direct',
                     'X-Security-Sanitized': 'true',
                     'X-Threats-Neutralized': (scrapeResult.securityShield?.injections_detected || 0).toString(),
-                    'X-Hidden-Elements-Purged': (scrapeResult.securityShield?.hidden_elements_purged || 0).toString()
+                    'X-Hidden-Elements-Purged': (scrapeResult.securityShield?.hidden_elements_purged || 0).toString(),
+                    'X-Token-Reduction': scrapeResult.fitMarkdown?.reduction_pct || '0%',
+                    'X-Tokens-Saved': (scrapeResult.fitMarkdown?.tokens_saved || 0).toString(),
+                    'X-JsonLd-Extracted': scrapeResult.fitMarkdown?.json_ld_extracted ? 'true' : 'false'
                 };
                 if (sessionUsed) {
                     responseHeaders['X-Session-Key'] = sessionKey;
@@ -967,6 +970,7 @@ npx -y github:guruautomationstt/x402-scraper-engine
                     tokens_estimated: scrapeResult.tokensEstimated,
                     bypass_tier: scrapeResult.bypassTier || 'stealth_direct',
                     security_shield: scrapeResult.securityShield,
+                    fit_markdown: scrapeResult.fitMarkdown,
                     payment: isInternal
                         ? {
                             mode: 'asot_internal_authorized',
